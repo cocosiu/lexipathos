@@ -910,3 +910,9 @@ async function loadAllDataSources(con) {
 | IN 的 value 传数组 | `["a", "b"]` 不是 `"a,b"` 也不是 `"a"` |
 | 表数量取决于关系图质量 | 边不断、不成环、无笛卡尔积风险则几乎无上限 |
 | calcFn 含中文时 | 建议把请求体写文件 `-d @query.json`，避免 shell 编码问题 |
+
+---
+
+## 开源协议
+
+本项目基于 **MIT License** 开源。详见 [LICENSE](./LICENSE) 文件。

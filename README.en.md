@@ -906,3 +906,9 @@ Example: switching from "office leasing" to "e-commerce orders":
 | IN value must be an array | `["a", "b"]` not `"a,b"` or `"a"` |
 | Table count depends on graph quality | Virtually unlimited if edges connect, no cycles, no Cartesian risk |
 | calcFn with non-ASCII chars | Write request body to file `-d @query.json` to avoid shell encoding issues |
+
+---
+
+## License
+
+This project is open source under the **MIT License**. See the [LICENSE](./LICENSE) file for details.
