@@ -1,8 +1,8 @@
-# Semantic Query Engine Guide
+# LexiPathOS
 
 ## Overview
 
-A **DuckDB**-based semantic query engine that uses a unified JSON DSL to query any structured data in natural semantics, without writing SQL or understanding underlying table relationships.
+LexiPathOS is a **DuckDB**-based semantic query engine that uses a unified JSON DSL to query any structured data in natural semantics, without writing SQL or understanding underlying table relationships.
 
 **Core Capabilities:**
 - Automatic multi-table JOIN path inference (Dijkstra weighted optimal path)
