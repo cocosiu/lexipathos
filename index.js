@@ -19,7 +19,7 @@ app.use(express.json());
 
 // 跨域配置
 app.use(cors({
-    origin: 'http://47.121.125.126:3001',
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3001',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true
 }));
