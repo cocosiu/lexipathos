@@ -1,3 +1,4 @@
+67ea73619ee721c1ecce9ae9ae1936eec782ae80
 const units_enum_mapping = {
     'units.status': {
         'unpartitioned': '未分割',
@@ -111,6 +112,13 @@ const customer_enum_mapping = {
         '1': '已锁定',
         false: '可编辑',
         true: '已锁定'
+    },
+    'customers.industry': {
+        'entity': '实业',
+        'finance': '金融',
+        'internet': '互联网',
+        'services': '服务',
+        'trade': '贸易'
     }
 };
 
