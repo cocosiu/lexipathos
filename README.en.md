@@ -273,7 +273,7 @@ How many tables can be JOINed depends on how well the graph is configured, not t
 | Constraint | Description |
 |---|---|
 | **Edges must connect** | Tables in a query must have a reachable path. Missing intermediaries are auto-filled, but if start and end are disconnected, an error is thrown |
-| **No cycles** | One-way edges only; never declare the same relationship bidirectionally. Cycles cause Dijkstra infinite loops or path ambiguity |
+| **No cycles** | Declare bidirectionally but avoid cross-cycles (e.g. A→B, B→C, C→A). Cycles cause Dijkstra infinite loops or path ambiguity. The `autoGenerateJoins` dedup only handles the same direct edge, not multi-table cycles |
 | **No Cartesian risk** | Long `one_to_many` chains cause row explosion (1 contract × 10 periods × 5 bills = 50 rows). Direct `many_to_many` associations are high-risk — always bridge via intermediary tables |
 
 Otherwise, table count is practically only limited by DuckDB's performance — multiple tables can theoretically work as long as the graph is clean.
@@ -653,11 +653,11 @@ const resourceDictionary = {
 
 ### 1.1 Edge Configuration (ResourceGraph Core)
 
-#### Core Principle: One-Way Only, No Bidirectional
+#### Core Principle: Bidirectional Declaration, Engine Auto-Dedup
 
-**Each edge is declared once in one direction — never bidirectionally.** The engine internally generates reverse edges for routing, but bidirectional user configuration creates cycles that break Dijkstra's path inference.
+**Each business relationship is declared once in both directions** — `belongs_to` on the foreign key table, `has_many` on the primary key table. The `autoGenerateJoins` method uses a `joinKeys` set to automatically deduplicate, ensuring the same relationship never generates duplicate JOIN clauses.
 
-> Rule: **Declare edges on the table that holds the foreign key, pointing to the target table.**
+> Rule: **Declare `belongs_to` on the table holding the foreign key, and `has_many` on the table holding the primary key.**
 
 ---
 
@@ -742,7 +742,7 @@ Engine processing flow:
 
 **Why this prevents cycles:**
 
-- Users configure only one-way edges — the graph is DAG-oriented
+- Users declare edges bidirectionally, but `autoGenerateJoins` deduplicates via the `joinKeys` set on `[leftAlias, rightAlias]` — same relationship gets only one JOIN
 - `dataSources` limits the search scope — each query routes within a 3~6 table closure
 - The engine never loads the full queryable graph into one query, avoiding cross-domain ambiguous paths
 - Internal reverse edges are only used for Dijkstra "backtracking," never producing real SQL cycles
@@ -766,55 +766,55 @@ Request: dataSources = [contracts, buildings]
 4. Lock alias chain:
    contracts → cu_as_contract_units → u_as_unit → b
 
-5. Generate INNER JOIN:
-   cu ON cu.contract_id = c.id
-   u  ON u.id = cu.unit_id
-   b  ON b.id = u.building_id
+5. Generate INNER JOIN (aliases are sequentially assigned by SQL builder as `t1, t2...`):
+   t2 ON t2.contract_id = t1.id
+   t3 ON t3.unit_id     = t2.unit_id
+   t4 ON t4.building_id = t3.building_id
 ```
 
 ---
 
 #### Configuration Method
 
-**Declare `belongs_to` on foreign key tables:**
+**Declare both directions — engine auto-dedup:**
 
 ```javascript
-// contracts: belongs to tenants
+// contracts: both FK and PK sides
 contracts: {
   relations: [
-    { name: "tenant", type: "tenants", relation_type: "belongs_to", on: "contracts.tenant_id = tenants.id" }
+    // belongs_to to parent
+    { name: "tenant", type: "tenants", relation_type: "belongs_to", on: "contracts.tenant_id = tenants.id" },
+    // has_many to children
+    { name: "contract_units", type: "contract_units", relation_type: "has_many", on: "contract_units.contract_id = contracts.id" },
+    { name: "terms",         type: "contract_terms",  relation_type: "has_many",   on: "contract_terms.contract_id  = contracts.id" },
+    { name: "bills",         type: "bills",           relation_type: "has_many",   on: "bills.contract_id          = contracts.id" },
   ]
 }
 
-// contract_units: belongs to contracts and units
-contract_units: {
-  relations: [
-    { name: "contract", type: "contracts", relation_type: "belongs_to", on: "contract_units.contract_id = contracts.id" },
-    { name: "unit",     type: "units",     relation_type: "belongs_to", on: "contract_units.unit_id = units.id" }
-  ]
-}
-
-// Primary key tables (tenants, units, etc.): only configure has_many pointing to themselves
+// units: both FK and PK sides
 units: {
   relations: [
-    { name: "contract_units", type: "contract_units", relation_type: "has_many", on: "contract_units.unit_id = units.id" },
-    { name: "building",      type: "buildings",      relation_type: "belongs_to", on: "units.building_id = buildings.id" }
+    // belongs_to to parent
+    { name: "building",       type: "buildings",                    relation_type: "belongs_to", on: "units.building_id         = buildings.id" },
+    // has_many to children
+    { name: "contract_units", type: "contract_units",               relation_type: "has_many",   on: "contract_units.unit_id  = units.id" },
+    { name: "visited_records", type: "crm_customer_visited_units",  relation_type: "has_many",   on: "crm_customer_visited_units.unit_id = units.id" },
   ]
 }
 ```
 
-> Declare `belongs_to` on the foreign key table and `has_many` on the primary key table. Don't configure both sides of the same relationship.
+> Declare `belongs_to` on the foreign key table and `has_many` on the primary key table. Configure both ends — the engine deduplicates automatically.
 
 #### Configuration Rules
 
 | Rule | Description |
 |---|---|
-| ✅ **One direction only** | FK table: `belongs_to`, PK table: `has_many`. Pick one, never both |
+| ✅ **Bidirectional declaration** | FK table: `belongs_to`, PK table: `has_many`. Configure both ends |
 | ✅ **Semantic relation names** | Use `"tenant"` instead of `"rel1"` — readable at debug time |
 | ✅ **Accurate relation_type** | `belongs_to` or `has_many`, don't mix them up |
 | ✅ **Bridge tables fully declared** | Many-to-many must go through an intermediary in two hops |
 | ✅ **Use raw table names in `on`** | The engine auto-replaces with aliases |
-| ❌ **Don't declare both ends** | Causes cycles |
+| ❌ **Avoid cycles** | Even with bidirectional edges, avoid multi-table loops (A→B→C→A) |
 | ❌ **Don't use `many_to_many` directly** | Must bridge through an intermediary table |
 
 #### Debugging Paths
