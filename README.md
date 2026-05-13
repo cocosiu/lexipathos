@@ -274,7 +274,7 @@ DuckDB 内存库就绪，等待 DSL 查询
 | 约束 | 说明 |
 |---|---|
 | **边不断** | 查询涉及的表之间必须有路径可达。缺中间表引擎会自动补全，但起点和终点之间如果根本不通就会报错 |
-| **不成环** | 单向配边、禁止双向声明同一条关系。环路会导致 Dijkstra 死循环或路径歧义 |
+| **不成环** | 双向配边但要避免声明交叉环路（如 A→B、B→C、C→A）。环路会导致 Dijkstra 死循环或路径歧义。`autoGenerateJoins` 的去重仅处理同一条直连边，无法解决多表环路 |
 | **无笛卡尔积风险** | `one_to_many` 链路过长→中间表行数膨胀→结果集爆炸（1条合同×10条账期×5条账单=50行）。`many_to_many` 直接关联更是高危操作，必须通过桥接表分两步走 |
 
 除此之外，表数量几乎只受限于 DuckDB 的性能——多张表理论上都能走通，只要图配得干净。
@@ -657,11 +657,11 @@ const resourceDictionary = {
 
 ### 1.1 图的边配置详解（ResourceGraph 核心）
 
-#### 核心原则：只配单向，禁止双向
+#### 核心原则：双向声明，引擎自动去重
 
-**每条边只在一个方向声明一次，绝不双向配置。** 引擎内部会自动生成反向边用于寻路，但用户配双向会产生环路，破坏 Dijkstra 的路径推演。
+**每条业务关系在两个方向各声明一次**——外键表配 `belongs_to`，主键表配 `has_many`。引擎在 `autoGenerateJoins` 中通过 `joinKeys` 集合自动去重，确保同一条关系不会生成重复的 JOIN 子句。
 
-> 配置方向规则：**在外键所在的表上声明边，指向目标表。**
+> 配置方向规则：**在外键所在的表上声明 `belongs_to`，在主键所在的表上声明 `has_many`。**
 
 ---
 
@@ -746,7 +746,7 @@ const resourceDictionary = {
 
 **为什么这样能防环路：**
 
-- 用户只配单向边，图结构是指向性明确的 DAG 倾向结构
+- 用户双向配边，但 `autoGenerateJoins` 通过 `joinKeys` 集合对 `[leftAlias, rightAlias]` 排序后去重，同一条关系只生成一次 JOIN
 - `dataSources` 限制了搜索范围，每次查询只在 3~6 张表的闭包内寻路
 - 引擎不会把可查图加载到一次查询中，避免了跨业务的歧义路径
 - 内部的反向边只用于 Dijkstra 的「回退搜索」，不会产生真正的 SQL 环路
@@ -770,55 +770,57 @@ const resourceDictionary = {
 4. 锁定别名链:
    contracts → cu_as_contract_units → u_as_unit → b
 
-5. 生成 INNER JOIN:
-   cu ON cu.contract_id = c.id
-   u  ON u.id = cu.unit_id
-   b  ON b.id = u.building_id
+5. 生成 INNER JOIN（别名由 SQL 生成器顺序分配 `t1, t2...`）：
+   t2 ON t2.contract_id = t1.id
+   t3 ON t3.unit_id     = t2.unit_id
+   t4 ON t4.building_id = t3.building_id
 ```
 
 ---
 
 #### 配置方法
 
-**在外键表上声明 `belongs_to`：**
+**两端都配，引擎自动去重：**
 
 ```javascript
-// contracts 表：声明它属于 tenants
+// contracts 表：外键表和主键表都配
 contracts: {
   relations: [
-    { name: "tenant", type: "tenants", relation_type: "belongs_to", on: "contracts.tenant_id = tenants.id" }
+    // belongs_to 指向父表
+    { name: "tenant", type: "tenants", relation_type: "belongs_to", on: "contracts.tenant_id = tenants.id" },
+    // has_many 指向子表
+    { name: "contract_units", type: "contract_units", relation_type: "has_many", on: "contract_units.contract_id = contracts.id" },
+    { name: "terms",         type: "contract_terms",  relation_type: "has_many",   on: "contract_terms.contract_id  = contracts.id" },
+    { name: "bills",         type: "bills",           relation_type: "has_many",   on: "bills.contract_id          = contracts.id" },
   ]
 }
 
-// contract_units 表：声明它属于 contracts 和 units
-contract_units: {
-  relations: [
-    { name: "contract", type: "contracts", relation_type: "belongs_to", on: "contract_units.contract_id = contracts.id" },
-    { name: "unit",     type: "units",     relation_type: "belongs_to", on: "contract_units.unit_id = units.id" }
-  ]
-}
-
-// 主键表（tenants, units 等）：只配 has_many 指向自己，不反指外键表
+// units 表：两端都配
 units: {
   relations: [
-    { name: "contract_units", type: "contract_units", relation_type: "has_many", on: "contract_units.unit_id = units.id" },
-    { name: "building",      type: "buildings",      relation_type: "belongs_to", on: "units.building_id = buildings.id" }
+    // belongs_to 指向父表
+    { name: "building",       type: "buildings",                    relation_type: "belongs_to", on: "units.building_id         = buildings.id" },
+    // has_many 指向子表
+    { name: "contract_units", type: "contract_units",               relation_type: "has_many",   on: "contract_units.unit_id  = units.id" },
+    { name: "visited_records", type: "crm_customer_visited_units",  relation_type: "has_many",   on: "crm_customer_visited_units.unit_id = units.id" },
   ]
 }
 ```
 
-> `belongs_to` 声明在外键表上，`has_many` 声明在主键表上。不要两张表都配同一条关系。
+> `belongs_to` 声明在外键表上，`has_many` 声明在主键表上。两端都配，引擎自动去重。
 
 #### 配置守则
 
 | 准则 | 说明 |
 |---|---|
-| ✅ **只配一个方向** | 外键表配 `belongs_to`，主键表配 `has_many`，二选一，不要同时配 |
+| 准则 | 说明 |
+|---|---|
+| ✅ **双向声明** | 外键表配 `belongs_to`，主键表配 `has_many`，两端都配 |
 | ✅ **关系名要有语义** | 用 `"tenant"` 而不是 `"rel1"`，别名调试时一眼看懂 |
 | ✅ **relation_type 标注准确** | `belongs_to` 或 `has_many`，不要混用 |
 | ✅ **桥接表要完整声明** | 多对多必须通过中间表两步跳转 |
 | ✅ **`on` 条件中的表名用原始表名** | 引擎会自动替换为别名 |
-| ❌ **不要在两端都声明同一条关系** | 会产生环路 |
+| ❌ **避免环路** | 即使是双向配边，也要避免 A→B、B→C、C→A 式的三表及以上环路 |
 | ❌ **不要配 `many_to_many` 直接连 A→B** | 必须通过中间表桥接 |
 
 #### 调试路径
