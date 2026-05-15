@@ -225,7 +225,7 @@ DuckDB in-memory ready, awaiting DSL queries
 
 | Param | Type | Required | Description |
 |---|---|---|---|
-| `dataSources` | `[{table}]` | ✅ | Table list; only need starting tables, API auto-fills intermediaries |
+| `dataSources` | `[{table}]` | ✅ | Table list; only need starting tables, API auto-fills intermediaries. ⚠️ **Fact table first** (e.g. start with `customers` for client queries, `contracts` for contract queries), dimension tables after. Wrong order causes alias conflicts |
 | `rowDims` | `[string\|object]` | ❌ | Row dimensions. string=`"table.field"`, object=`{alias, field, groupBy?}` |
 | `metrics` | `[object]` | ❌ | Aggregate metrics. `{field, agg, alias}` or `{alias, calcFnForMatrix}` |
 | `filters` | `[object]` | ❌ | Filter conditions. `{field, op, value}` |
@@ -259,6 +259,14 @@ DuckDB in-memory ready, awaiting DSL queries
 2. Auto-fill intermediary tables (e.g., contracts → contract_units → units → buildings)
 3. Assign non-conflicting table aliases
 4. Generate the complete JOIN chain
+
+> ⚠️ **Intent-Driven Design**:
+>
+> **Primary mode (clear intent)**: List only the **fact table** (the main entity, e.g. `customers`, `contracts`, `units`) plus **dimension tables** in `dataSources`. The engine auto-fills bridge tables and assigns aliases. **Fact table must be first** — wrong order causes alias conflicts during auto-fill.
+>
+> **Fallback mode (ambiguous intent)**: If the user can't clearly express intent, or the table order causes alias conflicts, **explicitly list the complete table chain in `dataSources`** (including bridge tables like `contract_units`, `crm_customer_visited_units`). The engine will skip auto-fill and use the user-specified table order directly, avoiding all alias conflicts.
+>
+> Switch between modes as needed — concise when intent is clear, explicit when it's not.
 
 Path weight design (**preset but not yet active** — retained for edge cases with few nodes but compound paths):
 - **belongs_to / has_many** main path: weight 1.0
