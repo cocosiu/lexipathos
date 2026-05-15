@@ -225,7 +225,7 @@ DuckDB 内存库就绪，等待 DSL 查询
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `dataSources` | `[{table}]` | ✅ | 数据源表列表，只需起点表，API 自动补中间表 |
+| `dataSources` | `[{table}]` | ✅ | 数据源表列表，只需起点表，API 自动补中间表。⚠️ **事实表放第一位**（如查客户用 `customers` 开头，查合同用 `contracts` 开头），维度表往后排，顺序反了会导致别名冲突 |
 | `rowDims` | `[string\|object]` | ❌ | 行维度。string=`"表.字段"`，object=`{alias, field, groupBy?}` |
 | `metrics` | `[object]` | ❌ | 聚合指标。`{field, agg, alias}` 或 `{alias, calcFnForMatrix}` |
 | `filters` | `[object]` | ❌ | 过滤条件。`{field, op, value}` |
@@ -260,6 +260,14 @@ DuckDB 内存库就绪，等待 DSL 查询
 2. 自动补全中间表（如 contracts → contract_units → units → buildings）
 3. 分配不冲突的表别名
 4. 生成完整的 JOIN 链条
+
+> ⚠️ **意图驱动的设计**：
+>
+> **主模式（意图明确）**：用户只需在 `dataSources` 中列出**事实表（查询主体，如 customers、contracts、units）和维度表**，引擎自动补全中间桥接表并分配别名。此时**事实表应排第一**，否则自动补表时别名可能冲突。
+>
+> **降级模式（意图模糊）**：如果用户不确定如何表达意图，或者事实表排序不当导致别名冲突，可以**显式把完整的表链全部写入 `dataSources`**（包括桥接表如 contract_units、crm_customer_visited_units 等），引擎会跳过自动补表，直接使用用户指定的表顺序分配别名，彻底避免冲突。
+>
+> 两种模式按需切换——意图清晰时省心，意图模糊时兜底。
 
 路径权重设计（**预设，暂不发挥作用**，为预防节点少但仍有复合路径的极端场景保留）：
 - **belongs_to / has_many** 主路径：权重 1.0
