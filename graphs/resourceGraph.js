@@ -1,4 +1,4 @@
-const { resourceDictionary } = require("./resourceDictionary");
+const { resourceDictionary } = require("../resources/resourceDictionary");
 
 class ResourceGraph {
     constructor(dict) {
