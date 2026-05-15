@@ -1,4 +1,4 @@
-const { resourceGraph } = require('../resources/resourceGraph');
+const { resourceGraph } = require('../graphs/resourceGraph');
 const { resourceDictionary } = require('../resources/resourceDictionary');
 class ReportBuilder {
     constructor({ con } = {}) {
